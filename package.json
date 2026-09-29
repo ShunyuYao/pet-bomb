@@ -1,0 +1,16 @@
+{
+  "name": "pet-bomb",
+  "version": "0.1.0",
+  "private": true,
+  "description": "桌宠水球大作战 — a single-file HTML balloon battle for the desktop pet's HTML works (LAN, 1–4 players).",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "kit:update": "node ../pet-kit/scripts/vendor.cjs .",
+    "test:rules": "node --test tests/rules.test.cjs",
+    "test:net": "node --test tests/net.test.cjs",
+    "test:browser": "node tests/browser-e2e.cjs",
+    "test:host": "node tests/host-e2e.cjs",
+    "test": "npm run build && npm run test:rules && npm run test:net && npm run test:browser"
+  }
+}

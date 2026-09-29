@@ -1,0 +1,11 @@
+{
+  "name": "pet-kit",
+  "version": "0.1.0",
+  "files": {
+    "index.js": "5a015ca998798a2b62dc239187e1d2726fafe7a30078815c3c3c342ef094f5a7",
+    "looks.js": "2d3404c2ccdce98ce64b8a3b88e58802b6648f26944568fc676ca50c13efaa9a",
+    "room.js": "3a3f516d2465a06400b790c0779c31eb746605997567c8bd931fc89bc58698a7",
+    "wire.js": "86c069764a91e7e203d815b431270cf680cde4085e000b71dce949d1f92356ac",
+    "zip.js": "0bfd7b845ed875272eb7b114ff22f8aafa0aa9f0f53a91f4ced638f8546126ad"
+  }
+}

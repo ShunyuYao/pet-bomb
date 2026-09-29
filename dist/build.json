@@ -1,0 +1,14 @@
+{
+  "file": "dist/桌宠水球大作战.html",
+  "bytes": 722569,
+  "sha256": "34f8ab1d7d411a3c821449aee27e7595d8853cf410cd1705f4c1baefdb958133",
+  "version": "0.1.0",
+  "protocol": {
+    "id": "pet-bomb",
+    "version": 1
+  },
+  "petKit": "0.1.0",
+  "esbuild": "0.28.1",
+  "three": "0.164.1",
+  "cannon": "0.20.0"
+}
