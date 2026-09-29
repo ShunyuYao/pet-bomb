@@ -30,14 +30,14 @@ npm run test:rules   # 规则单测
 npm run test:net     # 联机（pet-kit 的严格模拟宿主：丢包、限速、宿主限额）
 npm run test:browser # 普通浏览器端到端（真实按键）
 npm run test:host    # 三台真实桌宠宿主端到端（需要本地宿主源码与角色包）
-npm run kit:update   # 换进 ../pet-kit 的当前版本，之后跑全部测试
+npm run kit:update   # 换进旁边 ../pet-kit 的当前版本，之后跑全部测试
 ```
 
 规则、数值和每条规则对应的测试见 [docs/SPEC.zh-CN.md](docs/SPEC.zh-CN.md)。
 
 ## 第三方
 
-- pet-kit 0.1.0（MIT）：`vendor/pet-kit/`，联机房间、传输、形象读取；由 `npm run kit:update` 写入，不在本仓库里改。
+- [pet-kit](https://github.com/ShunyuYao/pet-kit) 0.1.0（MIT）：`vendor/pet-kit/`，联机房间、传输、形象读取；由 `npm run kit:update`（需要把 pet-kit 放在本仓库旁边）写入，不在本仓库里改。
 - three.js 0.164.1（MIT）、cannon-es 0.20.0（MIT）：`vendor/lib/`
 - pet-ragdoll-renderer 0.2.0（MIT）：`vendor/doll/`，说明见其中的 NOTICE.md
 - 其余美术（场景、道具、水球、角色玩具）和音效都由代码生成，没有外部素材。
