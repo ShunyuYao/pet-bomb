@@ -1,6 +1,6 @@
 {
   "name": "pet-bomb",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "桌宠水球大作战 — a single-file HTML balloon battle for the desktop pet's HTML works (LAN, 1–4 players).",
   "license": "MIT",

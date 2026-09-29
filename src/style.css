@@ -175,3 +175,10 @@ body.dragging .drop-hint{display:grid}
 .lobby-opts{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}
 .lobby-opts .field-label{margin:12px 0 6px}
 #lobby-panel .primary{margin-top:14px}
+
+/* narrower side cards so the board can be larger */
+.side{top:96px;gap:10px}.side.l{left:8px}.side.r{right:8px}
+.card{width:122px;padding:8px 9px}
+.card .hd .mini{width:28px;height:28px}
+.card .hd b{font-size:13px;max-width:72px}
+.card .st div{font-size:14px}

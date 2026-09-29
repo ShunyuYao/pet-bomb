@@ -7,7 +7,7 @@ import Sim from '../game/sim.cjs';
 import {buildAvatar} from './avatars.js';
 
 const {W,H,CELL,ITEMS,BALLOON,TRAP}=Config;
-const OX=(W-1)/2,OZ=(H-1)/2,PET_HEIGHT=1.12;
+const OX=(W-1)/2,OZ=(H-1)/2,PET_HEIGHT=1.35;
 const wx=gx=>gx-OX,wz=gy=>gy-OZ;
 const SLOT=Config.SLOT_COLORS.map(c=>new THREE.Color(c)),TEAM=Config.TEAMS.map(t=>new THREE.Color(t.color));
 
@@ -163,11 +163,33 @@ export function createWorld(canvas){
   }
 
   function resize(){const w=canvas.clientWidth||innerWidth,h=canvas.clientHeight||innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();fit();}
-  // Fit the whole board (plus the wall ring) between the side cards.
+  // Frame the board as large as it goes: the playable cells (inside the wall ring) must fit
+  // between the side cards and under the score bar; the outer wall may run under the cards.
+  // Found by projecting the board corners, so it holds for any window size.
+  const PITCH=58*Math.PI/180,_v=new THREE.Vector3();
+  function fits(dist,lookZ,box){
+    camera.position.set(0,dist*Math.sin(PITCH),lookZ+dist*Math.cos(PITCH));camera.lookAt(0,0,lookZ);camera.updateMatrixWorld();
+    let minX=1,maxX=-1,minY=1,maxY=-1;
+    for(const [x,z,y] of [[-OX+0.5,-OZ+0.5,PET_HEIGHT],[OX-0.5,-OZ+0.5,PET_HEIGHT],[-OX+0.5,OZ-0.5,0],[OX-0.5,OZ-0.5,0],[-OX+0.5,OZ-0.5,0.3],[OX-0.5,OZ-0.5,0.3]]){
+      _v.set(x,y,z).project(camera);minX=Math.min(minX,_v.x);maxX=Math.max(maxX,_v.x);minY=Math.min(minY,_v.y);maxY=Math.max(maxY,_v.y);}
+    return {ok:minX>=box.l&&maxX<=box.r&&minY>=box.b&&maxY<=box.t,minY,maxY};
+  }
   function fit(){
-    const aspect=camera.aspect,pitch=64*Math.PI/180,need=Math.max((W+0.8)/Math.max(0.6,aspect*0.7),(H+1.2));
-    const dist=need/(2*Math.tan(camera.fov*Math.PI/360))*1.02;
-    camera.position.set(0,dist*Math.sin(pitch),dist*Math.cos(pitch)+0.4);camera.lookAt(0,0,0.4);
+    const w=canvas.clientWidth||innerWidth,h=canvas.clientHeight||innerHeight;
+    const side=w>700?Math.min(0.2,150/w*2):0.04; // side cards take ~140 px each on a wide window
+    const box={l:-1+side,r:1-side,b:-1+36/h*2,t:1-96/h*2};
+    const want=(box.b+box.t)/2;let lookZ=0.3,hi=80;
+    for(let pass=0;pass<4;pass++){
+      let lo=4;hi=80;for(let k=0;k<30;k++){const m=(lo+hi)/2;if(fits(m,lookZ,box).ok)hi=m;else lo=m;}
+      // Centre the board vertically inside the box (the projected middle moves monotonically
+      // with the look-at point), then fit the distance again.
+      const mid=z=>{const f=fits(hi,z,box);return (f.minY+f.maxY)/2;};
+      let a=-OZ,c=OZ;const up=mid(c)>mid(a);
+      for(let k=0;k<30;k++){const m=(a+c)/2;if((mid(m)>want)===up)c=m;else a=m;}
+      lookZ=(a+c)/2;
+    }
+    let lo=4;hi=80;for(let k=0;k<30;k++){const m=(lo+hi)/2;if(fits(m,lookZ,box).ok)hi=m;else lo=m;}
+    fits(hi,lookZ,box);
   }
   addEventListener('resize',resize);resize();
 
