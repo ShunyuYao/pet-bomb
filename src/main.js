@@ -109,7 +109,9 @@ $('grant-retry').addEventListener('click',async()=>{if(await readPet())await joi
 // ---------- players in the view ----------
 // me = my driver; other humans = their transferred look (a toy until it arrives); computers = toys.
 function lookOf(r,g){
-  if(r.slot===g.mySlot&&driver)return {signature:driver.profile.signature,asset:driver.asset,fallback:driver.fallback};
+  // Room does not transfer a recipient's own signature back to that recipient.
+  // Another seat with the identical validated appearance can use the local data.
+  if(driver&&(r.slot===g.mySlot||(r.kind!=='bot'&&r.signature===driver.profile.signature)))return {signature:driver.profile.signature,asset:driver.asset,fallback:driver.fallback};
   if(r.kind==='bot'){const look=CPU_LOOKS[r.slot%CPU_LOOKS.length];return {signature:'cpu:'+r.slot+look.species,asset:{kind:'toy',...look}};}
   const asset=peerAssets.get(r.signature);
   return {signature:asset?r.signature:'pending:'+r.signature,asset:asset||{kind:'toy',species:'mouse',color:colorOf(r.slot)}};

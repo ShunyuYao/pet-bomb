@@ -62,5 +62,5 @@ const check=(ok,label,detail)=>{assert.ok(ok,label+(detail!==undefined?' '+JSON.
     await p.activate('#again');await wait('window.__bomb.state().phase==="count"','rematch');check(true,'rematch from the results panel');
     await p.activate('#leave');await wait('window.__bomb.state().mode==="title"','back to title');check(true,'leave returns to the title');
     assert.deepEqual(errors,[],'no page errors');check(true,'no page errors or exceptions');
-  }finally{close();}
+  }finally{await close();}
 })().catch(e=>{console.error(e);process.exit(1);});

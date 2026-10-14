@@ -1,16 +1,20 @@
 {
   "name": "pet-bomb",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
-  "description": "桌宠水球大作战 — a single-file HTML balloon battle for the desktop pet's HTML works (LAN, 1–4 players).",
+  "description": "桌宠水球大作战 — a single-file HTML balloon battle for the desktop pet's HTML works (internet and LAN, 1–4 players).",
   "license": "MIT",
   "scripts": {
     "build": "node scripts/build.cjs",
-    "kit:update": "node ../pet-kit/scripts/vendor.cjs .",
+    "kit:update": "node scripts/update-kit.cjs",
     "test:rules": "node --test tests/rules.test.cjs",
     "test:net": "node --test tests/net.test.cjs",
     "test:browser": "node tests/browser-e2e.cjs",
     "test:host": "node tests/host-e2e.cjs",
-    "test": "npm run build && npm run test:rules && npm run test:net && npm run test:browser"
+    "test": "npm run build && npm run test:artifact && npm run test:rules && npm run test:net && npm run test:browser",
+    "test:artifact": "node --test tests/artifact.test.cjs",
+    "test:host:relay": "node tests/host-e2e.cjs --relay --four",
+    "test:host:mixed": "node tests/host-e2e.cjs --mixed --four",
+    "test:delivery": "npm test && npm run test:host && npm run test:host:relay && npm run test:host:mixed"
   }
 }

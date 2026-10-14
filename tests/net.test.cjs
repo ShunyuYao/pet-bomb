@@ -8,7 +8,7 @@ const Net=require('../game/net.js'),Sim=require('../game/sim.cjs'),AI=require('.
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function waitFor(fn,label,ms=5000){const until=Date.now()+ms;while(Date.now()<until){if(fn())return;await sleep(30);}throw Error('timeout: '+label);}
 const TIMING={playMs:24000,suddenAtMs:8000};
-const PROTOCOL={id:'pet-bomb',version:1};
+const PROTOCOL={id:'pet-bomb',version:2};
 
 function player(sdk,name,{seed=1,look=null,drive=null}={}){
   const errors=[],feed=[],assets=new Map(),seen=[],hashes={};

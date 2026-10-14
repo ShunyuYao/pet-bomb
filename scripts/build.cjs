@@ -5,22 +5,23 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
 const root=path.resolve(__dirname,'..');
 const esbuildPath=process.env.PET_BOMB_ESBUILD||path.resolve(root,'../../demo/node_modules/esbuild');
 const esbuild=require(esbuildPath);
-function checkKit(dir){
-  const kit=path.resolve(dir,'../pet-kit/scripts/vendor.cjs');
-  if(fs.existsSync(kit))return require(kit).check(dir);
-  return JSON.parse(fs.readFileSync(path.join(dir,'vendor/pet-kit/VERSION.json'),'utf8')).version; // pet-kit not next to us: trust the pinned copy
-}
 (async()=>{
-  // Game code may use only pet-kit's public entries, and the vendored copy must be untouched.
-  const kitVersion=checkKit(root);
+  const kitVersion=require('../vendor/pet-kit/verify.cjs').check(root);
   const result=await esbuild.build({entryPoints:[path.join(root,'src/main.js')],bundle:true,format:'iife',platform:'browser',target:['chrome120'],minify:true,write:false,legalComments:'inline',logLevel:'warning'});
   const js=result.outputFiles[0].text.replace(/<\/script/gi,'<\\/script');
   const css=fs.readFileSync(path.join(root,'src/style.css'),'utf8');
   const html=fs.readFileSync(path.join(root,'src/template.html'),'utf8').replace('__STYLE__',()=>css).replace('__SCRIPT__',()=>js);
   if(/__STYLE__|__SCRIPT__/.test(html))throw Error('template placeholders left');
+  const declaration=JSON.parse(html.match(/<script type="application\/json" id="pet-sdk">([^<]+)<\/script>/)?.[1]||'null');
+  if(declaration?.version!==2||declaration?.interaction?.players!==4||declaration?.interaction?.transport!=='auto'||JSON.stringify(declaration.interaction.protocol)!==JSON.stringify(require('../game/net.js').PROTOCOL))throw Error('manifest/runtime protocol mismatch');
   const bytes=Buffer.byteLength(html);if(bytes>10*1024*1024)throw Error('HTML exceeds host 10 MB limit');
   const out=path.join(root,'dist/桌宠水球大作战.html');fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,html);
   const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
-  const info={file:path.relative(root,out).split(path.sep).join('/'),bytes,sha256:crypto.createHash('sha256').update(html).digest('hex'),version:pkg.version,protocol:{id:'pet-bomb',version:1},petKit:kitVersion,esbuild:require(path.join(esbuildPath,'package.json')).version,three:'0.164.1',cannon:'0.20.0'};
-  fs.writeFileSync(path.join(root,'dist/build.json'),JSON.stringify(info,null,2));console.log(JSON.stringify(info,null,2));
+  const info={file:path.relative(root,out).split(path.sep).join('/'),bytes,sha256:crypto.createHash('sha256').update(html).digest('hex'),version:pkg.version,protocol:require('../game/net.js').PROTOCOL,transport:'auto',petKit:kitVersion,esbuild:require(path.join(esbuildPath,'package.json')).version,three:'0.164.1',cannon:'0.20.0'};
+  const lanHtml=html.replace('"transport":"auto"','"transport":"lan"');
+  if(lanHtml===html)throw Error('auto manifest is missing');
+  const lanOut=path.join(root,'dist/桌宠水球大作战-LAN.html');fs.writeFileSync(lanOut,lanHtml);
+  const lanInfo={...info,file:path.relative(root,lanOut).split(path.sep).join('/'),bytes:Buffer.byteLength(lanHtml),sha256:crypto.createHash('sha256').update(lanHtml).digest('hex'),transport:'lan'};
+  fs.writeFileSync(path.join(root,'dist/build-lan.json'),JSON.stringify(lanInfo,null,2));
+  fs.writeFileSync(path.join(root,'dist/build.json'),JSON.stringify(info,null,2));console.log(JSON.stringify({auto:info,lan:lanInfo},null,2));
 })().catch(e=>{console.error(e);process.exit(1);});

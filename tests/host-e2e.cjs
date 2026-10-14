@@ -28,7 +28,14 @@ const evidence = path.join(GAME, 'artifacts/host-e2e', runId);
 const bootstrap = path.join(H.REPO, 'tests/helpers/peer-session-delivery-bootstrap.js');
 const report = { runId, root, scope: 'Actual three hidden production hosts (room of host + 2 guests) over loopback UDP/TCP/TLS. OS keystore is test AES-GCM only; native Keychain and two physical machines are not covered.', checks: [], failures: [], screenshots: [], dialogs: [], sdkGrants: [], exceptions: [] };
 const apps = [], sockets = [];
-let runtime;
+const mode=process.argv.includes('--mixed')?'mixed':process.argv.includes('--relay')?'relay':'lan';
+const playerCount=process.argv.includes('--four')?4:3;
+assert(!(process.argv.includes('--mixed')&&process.argv.includes('--relay')),'choose one network mode');
+report.mode=mode;report.playerCount=playerCount;report.scope='Actual '+playerCount+' hidden production hosts over '+mode+' (loopback) with real invite, TLS consent, current pets and CDP input; synthetic relay tickets and isolated AES keystore only; not physical internet proof.';
+let runtime,relay,mandatory;
+const labels=['a','b','c','d'].slice(0,playerCount);
+const isRelay=app=>mode==='relay'||mode==='mixed'&&app.label==='b';
+const peerId=app=>isRelay(app)?'relay:'+relay.uid(app.label):app.deviceId;
 const json = (file, value) => fs.writeFileSync(file, JSON.stringify(value, null, 2));
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 function check(label, detail) { report.checks.push({ label, pass: true, ...(detail === undefined ? {} : { detail }) }); console.log('PASS', label); }
@@ -44,17 +51,17 @@ async function focus(page, selector) { await H.cdp(page, 'Emulation.setFocusEmul
 async function input(page, selector, text) { await focus(page, selector); await H.cdp(page, 'Input.insertText', { text }); assert.equal(await H.evalIn(page, `document.querySelector(${JSON.stringify(selector)}).value`), text); }
 async function boot(label, discovery, peerDiscoveries) {
   const app = { label, profile: path.join(root, label), deviceId: crypto.randomUUID(), name: 'Peer delivery ' + label, cdp: await F.freePort() };
-  apps.push(app); fs.mkdirSync(app.profile);
+  apps.push(app); fs.mkdirSync(app.profile);if(relay){app.uid=relay.uid(label);relay.prepare(app.profile,label,labels);}
   json(path.join(app.profile, 'device.json'), { deviceId: app.deviceId, name: app.name });
   json(path.join(app.profile, 'friends.json'), { friends: [], pending: [], outgoing: [] });
   json(path.join(app.profile, 'settings-privacy.json'), { version: 1, usageStatsEnabled: false, doNotDisturb: false, verboseLogging: false });
   json(path.join(app.profile, 'config.json'), { character: label === 'a' ? 'qiqi' : 'nienie', petName: app.name,
     me: { petId: 'peer_delivery_' + label }, onboarding: { completed: true },
     behavior: { idleStroll: false, autoSleep: false, edgeSnap: false, petSize: 220 },
-    crossScreen: { allowDirectVisits: true, requireVisitConfirmation: false },
+    crossScreen: { lanEnabled:mode==='lan'||mode==='mixed'&&label!=='b',allowDirectVisits: true, requireVisitConfirmation: false },
     relay: { url: 'ws://127.0.0.1:1', paired: {} }, general: { autoCheckUpdates: false }, tts: { enabled: false },
     plugins: { developerMode: false, registrySources: ['http://127.0.0.1:1/registry.json'] } });
-  app.env = { ...process.env, ELECTRON_RUN_AS_NODE: undefined, PET_USERDATA_DIR: app.profile,
+  app.env = { ...process.env,...(mandatory?.env||{}),...(relay?relay.env(label):{}), ELECTRON_RUN_AS_NODE: undefined, PET_USERDATA_DIR: app.profile,
     PET_E2E_TEST: '1', PET_E2E_HIDDEN: '1', PET_E2E_BACKGROUND: '1', PET_DND_TRIGGER_COUNT: '999',
     PET_ACCOUNT_API_BASE: 'http://127.0.0.1:1', PET_ACTIVITY_BRIDGE_PORT: '0',
     PET_LAN_DISCOVERY_PORT: String(discovery), PET_LAN_DISCOVERY_TARGETS: [].concat(peerDiscoveries).map(p => '127.0.0.1:' + p).join(','),
@@ -66,6 +73,7 @@ async function launch(app) {
   app.run.native = path.join(evidence, app.run.label + '-native.jsonl'); fs.writeFileSync(app.run.native, '');
   app.child = spawn(electron, ['--require', bootstrap, runtime.demo, `--remote-debugging-port=${app.cdp}`, '--use-mock-keychain', '--mute-audio'], { cwd: runtime.demo, env: { ...app.env, PET_PUBLIC_NATIVE_LOG: app.run.native }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   app.run.pid = app.child.pid; app.child.log = ''; app.child.stdout.on('data', x => { app.child.log += x; }); app.child.stderr.on('data', x => { app.child.log += x; });
+  if(mandatory)await mandatory.login(app.cdp,'1997777666'+(app.label.charCodeAt(0)-96));
   app.pet = await H.findTarget(app.cdp, '/index.html');
   await wait(() => H.evalIn(app.pet, 'typeof currentCharKey==="string" && !!frames.idle?.[0]?.[0]?.naturalWidth'), 'real pet decoded ' + app.label);
   await wait(async () => (await H.evalIn(app.pet, H.CANVAS_PIXELS)) > 100, 'real pet painted ' + app.label);
@@ -75,23 +83,24 @@ async function launch(app) {
 }
 async function stop(app) {
   if (!app.child) return;
-  const child = app.child; H.kill(child);
+  const child = app.child;if(child.exitCode===null&&child.signalCode===null)H.kill(child);
   await wait(() => { try { process.kill(child.pid, 0); return false; } catch (e) { return e.code === 'ESRCH'; } }, 'owned host stopped ' + app.label, 10000);
   fs.writeFileSync(path.join(evidence, app.run.label + '-host.log'), child.log); app.run.exited = true; app.child = null;
 }
-async function nearby(a, b) { return wait(async () => { const rows = await H.evalIn(a.pet, 'petAPI.lanGetDevices()'); return rows.find(r => r.deviceId === b.deviceId); }, 'actual UDP discovered receiver'); }
+async function nearby(a, b) { return wait(async () => { const rows = await H.evalIn(a.pet,isRelay(b)?'petAPI.friendsOnlineGet()':'petAPI.lanGetDevices()');return rows.find(r=>r.deviceId===peerId(b)&&!r.offline); }, 'actual UDP discovered receiver'); }
 async function sendGame(a, b, {share = false} = {}) {
+  b.priorHostPeerIds=[];
   const previous = new Set(activity(b).records.map(r => r.id));
   const peer = await nearby(a, b); report.discovery = peer;
   await H.evalIn(a.pet, 'petAPI.openDashboard();true'); a.dashboard = await H.findReadyTarget(a.cdp, '/dashboard.html', 'dashboard');
   await wait(() => H.evalIn(a.dashboard, '!!document.querySelector("[data-action=resident-errand], .lan-row[data-via=lan] .lan-errand")'), 'real send entry ready');
   if(await H.evalIn(a.dashboard,'!!document.querySelector("[data-action=resident-errand]")')) {
     await activateButton(a.dashboard,'[data-action=resident-errand]');
-    const recipient='[data-friend="'+b.deviceId+'"]';
+    const recipient='[data-friend="'+peerId(b)+'"]';
     await wait(()=>H.evalIn(a.overlay,'!!document.querySelector('+JSON.stringify(recipient)+')'),'real discovered recipient');
     if(!await H.evalIn(a.overlay,'document.querySelector('+JSON.stringify(recipient)+').getAttribute("aria-pressed")==="true"'))await activateButton(a.overlay,recipient);
     // Only this recipient: other discovered devices are invited later from the game's control bar.
-    for(const other of apps.filter(x=>x!==a&&x!==b)){const sel='[data-friend="'+other.deviceId+'"]';if(await H.evalIn(a.overlay,'document.querySelector('+JSON.stringify(sel)+')?.getAttribute("aria-pressed")==="true"'))await activateButton(a.overlay,sel);}
+    for(const other of apps.filter(x=>x!==a&&x!==b)){const sel='[data-friend="'+peerId(other)+'"]';if(await H.evalIn(a.overlay,'document.querySelector('+JSON.stringify(sel)+')?.getAttribute("aria-pressed")==="true"'))await activateButton(a.overlay,sel);}
   } else {
     await activateClosingButton(a.cdp, a.dashboard, '.lan-row[data-via="lan"] .lan-errand');
   }
@@ -149,7 +158,13 @@ async function approvals(a, b, expectPair = true) {
   // The host context keeps the first invitation; each later guest has its own, listed in the host's peers.
   if (a.context.peers.length === 1) assert.equal(a.context.invitationId, b.context.invitationId);
   assert.equal(a.context.maxPlayers, 4); assert.equal(b.context.maxPlayers, 4);
-  assert(a.context.peers.some(p => p.displayName === b.name && p.status === 'connected'), 'host lists this guest as connected');
+  // Relay capability info intentionally carries device/fingerprint, not a
+  // display name. Bind the new connected session ID, never a LAN name assumption.
+  const prior=new Set(b.priorHostPeerIds||[]),added=a.context.peers.filter(p=>!prior.has(p.sessionPeerId));
+  assert.equal(added.length,1,'exactly the invited guest adds a new host session');
+  assert.equal(added[0].status,'connected','host lists the new guest as connected');
+  b.hostSessionPeerId=added[0].sessionPeerId;
+  (report.sessionBindings||=[]).push({guest:b.label,invitationId:b.context.invitationId,hostPeer:added[0]});
   check('real invite binds ' + b.label + ' to the host room: exact artifact, host referee, guest seat');
 }
 async function installAppearances(app) {
@@ -189,22 +204,26 @@ async function closeWork(app) {
 // ---------------- game-specific ----------------
 async function inviteFromControls(a,c){
   // The host's work-player control bar ("+ Invite n/4") invites a third device into the open room.
+  c.priorHostPeerIds=(await H.evalIn(a.game,'pet.sessions.getContext()')).peers.map(p=>p.sessionPeerId);
   const previous=new Set(activity(c).records.map(r=>r.id));
   const controls=await H.findTarget(a.cdp,'/work-player.html');
-  await wait(async()=>{const b=await H.evalIn(controls,'(()=>{const b=document.querySelector("[data-work-invite]");return b&&!b.disabled&&b.textContent})()');return b&&b.includes('2/4');},'host invite control enabled at 2/4');
-  await screenshot(controls,'10-host-controls-2of4');
+  await wait(async()=>{const b=await H.evalIn(controls,'(()=>{const b=document.querySelector("[data-work-invite]");return b&&!b.disabled&&b.textContent})()');return b&&b.includes((apps.filter(x=>x.game).length)+'/4');},'host invite control enabled below capacity');
+  await screenshot(controls,'10-host-controls-before-'+c.label);
   const gameId=a.game.id,origin=await H.evalIn(a.game,'performance.timeOrigin');
   await activateButton(controls,'[data-work-invite]');
   const picker=await wait(async()=>{for(const page of (await targets(a)).filter(t=>t.url.includes('/dialog.html'))){const init=await H.evalIn(page,'dialogAPI.getInit()',3000).catch(()=>null);if(init?.peerSessionKind==='room-invite'&&await H.evalIn(page,'!!document.querySelector(".btn-primary")'))return page;}return null;},'device picker');
   const text=await H.evalIn(picker,'document.body.innerText');assert(text.includes(c.name)&&!text.includes(apps[1].name),'picker offers only devices not yet in the room');
-  await screenshot(picker,'11-room-invite-picker');await activateClosingButton(a.cdp,picker,'.btn-primary');
+  const device=peerId(c),init=await H.evalIn(picker,'dialogAPI.getInit()');const index=init.buttons.findIndex(b=>b.action==='device:'+device);assert(index>=0,'intended peer offered by real picker');
+  report.inviteOptions=(report.inviteOptions||[]).concat({guest:c.label,via:isRelay(c)?'relay':'lan',buttons:init.buttons});
+  const selector='.btn-row button:nth-child('+(index+1)+')';assert.equal(await H.evalIn(picker,`document.querySelector(${JSON.stringify(selector)}).textContent`),c.name);
+  await screenshot(picker,'11-room-invite-picker-'+c.label);await activateClosingButton(a.cdp,picker,selector);
   const incoming=await wait(()=>activity(c).records.find(r=>!previous.has(r.id)&&r.direction==='incoming'&&r.file?.name===path.basename(source)&&r.file.savedPath&&fs.existsSync(r.file.savedPath)),'third device receives the same HTML',45000);
   assert.equal(hash(incoming.file.savedPath),hash(source));
   const receipt=await wait(async()=>{for(const page of (await targets(c)).filter(t=>t.url.includes('/dialog.html')))if(await H.evalIn(page,'!!document.querySelector("[data-work-open]")').catch(()=>false))return page;return null;},'work receipt on c');
   await activateClosingButton(c.cdp,receipt,'[data-work-open]');
   await approvals(a,c);
   assert.equal(a.game.id,gameId);assert.equal(await H.evalIn(a.game,'performance.timeOrigin'),origin,'host game never reloaded');
-  check('control-bar invite brings a third host into the open room without reloading the host game');
+  check('control-bar invite brings '+c.label+' into the open room without reloading the host game');
 }
 
 const {connect}=require('./cdp.cjs');
@@ -216,31 +235,46 @@ async function play(app,ms){
 }
 // Stand still and keep dropping balloons: a quick way to end rounds (your own splash traps you).
 async function giveUp(app,ms){const s=app.cdpS??=await connect(app.game);const until=Date.now()+ms;while(Date.now()<until){await s.press('Space');await H.sleep(700);}}
-async function bombPlay(a,b,c){
-  const all=[a,b,c];
-  for(const app of all)await wait(async()=>{const x=await state(app);return x.driver?.kind&&x.lobby?.length===3;},'driver + 3-human lobby '+app.label,60000);
+async function bombPlay(a,b,c,d){
+  const all=[a,b,c,...(d?[d]:[])];
+  for(const app of all)await wait(async()=>{const x=await state(app);return x.driver?.kind&&x.lobby?.length===all.length;},'driver + '+all.length+'-human lobby '+app.label,60000);
   for(const app of all)await screenshot(app.game,'12-lobby-'+app.label);
+  // Production deliberately exchanges looks only in the lobby. Large current
+  // packs must finish before pressing Ready; network tests keep the explicit
+  // assertion that no new look transfers start during a match.
+  const looksStarted=Date.now();
+  // c/d intentionally share the same built-in pet. Count unique fixture looks,
+  // then cross-check their actual receipt signatures after the settings snapshot.
+  const lookRows=await Promise.all(all.map(async app=>({app,...await state(app)})));
+  const lookKey=x=>JSON.stringify([x.driver.kind,x.driver.name]);
+  const looks=new Set(lookRows.map(lookKey)),expected=new Map(lookRows.map(x=>[x.net.mySlot,[...looks].filter(k=>k!==lookKey(x)).length]));
+  await wait(async()=>{const x=await state(a);return x.net.peers.length===all.length-1&&x.net.peers.every(p=>p.sent===expected.get(p.slot));},'all distinct lobby appearances have completed the real SDK transfer',600000);
+  check('complete lobby appearance forwarding before ready',{elapsedMs:Date.now()-looksStarted,peers:(await state(a)).net.peers});
   // Host-only settings; guests cannot change them.
   assert.equal(await H.evalIn(b.game,'document.querySelector(\'#lobby-rounds [data-value="3"]\').disabled'),true);
   await activateButton(a.game,'#lobby-mode [data-value="ffa"]');await activateButton(a.game,'#lobby-rounds [data-value="3"]');
+  const receiptRows=await wait(async()=>{const rows=await Promise.all(all.map(app=>state(app)));return rows.every(x=>x.net.ownSentSignature)?rows:null;},'actual signatures acknowledge every current lobby look',15000);
+  const signatures=new Map();for(const x of receiptRows){const key=lookKey(x);if(signatures.has(key))assert.equal(x.net.ownSentSignature,signatures.get(key),'shared fixture pet has the identical actual appearance signature');else signatures.set(key,x.net.ownSentSignature);}
+  assert.equal(new Set(signatures.values()).size,looks.size,'every distinct fixture look has a distinct received signature');
+  check('actual SDK look receipts verify distinct and shared appearances',{signatures:[...signatures.values()]});
   await activateButton(a.game,'#ready');await activateButton(b.game,'#ready');await H.sleep(1500);
   assert.equal((await state(c)).phase,'lobby','two of three ready does not start');
-  await activateButton(c.game,'#ready');
+  await activateButton(c.game,'#ready');if(d){await H.sleep(300);assert.equal((await state(d)).phase,'lobby','all four must ready');await activateButton(d.game,'#ready');}
   await wait(async()=>{for(const app of all)if(!['count','play'].includes((await state(app)).phase))return false;return true;},'all counting down',8000);
-  const first=await state(a);assert.equal(first.players.length,4);assert.equal(first.players.filter(x=>x.kind==='bot').length,1);
-  check('the match starts only when all three are ready; a computer player fills the fourth seat');
+  const first=await state(a);assert.equal(first.players.length,4);assert.equal(first.players.filter(x=>x.kind==='bot').length,4-all.length);
+  check('match requires all '+all.length+' humans ready; computers fill '+(4-all.length)+' seats');
   // Every screen draws every human with that human's own kind (2D / 3D).
   const kinds={},slots={};for(const app of all){const x=await state(app);kinds[app.label]=x.driver.kind;slots[app.label]=x.mySlot;}
   for(const app of all)await wait(async()=>{const p=(await world(app)).players;return all.every(o=>p.find(x=>x.slot===slots[o.label])?.kind===kinds[o.label]);},'every human drawn with its own kind on '+app.label,90000);
   check('each pet is drawn as its own 2D / 3D kind on every screen',{kinds,slots});
   await wait(async()=>(await state(a)).phase==='play','play',8000);
   // Play with real keys; meanwhile every screen must see balloons dropped by the others.
-  const seen={a:new Set(),b:new Set(),c:new Set()};let polling=true;
+  const seen=Object.fromEntries(all.map(app=>[app.label,new Set()]));let polling=true;
   const poll=(async()=>{while(polling){for(const app of all){const x=await state(app).catch(()=>null);for(const bl of x?.balloons||[])if(bl.owner!==x.mySlot)seen[app.label].add(bl.owner);}await H.sleep(150);}})();
   await Promise.all(all.map(app=>play(app,9000)));polling=false;await poll;
   for(const app of all)await screenshot(app.game,'13-play-'+app.label);
   for(const app of all)for(const o of all)if(o!==app)assert(seen[app.label].has(slots[o.label]),app.label+' saw no balloon from '+o.label+': '+[...seen[app.label]]);
-  check('three real keyboards walk and drop balloons; every screen sees the others\' balloons',Object.fromEntries(Object.entries(seen).map(([k,v])=>[k,[...v]])));
+  check(all.length+' real keyboards walk and drop balloons; every screen sees the others\' balloons',Object.fromEntries(Object.entries(seen).map(([k,v])=>[k,[...v]])));
   // End the rounds quickly: everyone stands on their own balloons until the match is decided.
   const deadline=Date.now()+240000;
   while(Date.now()<deadline){let done=true;for(const app of all)if((await state(app)).phase!=='results')done=false;if(done)break;await Promise.all(all.map(app=>giveUp(app,3000)));}
@@ -249,7 +283,7 @@ async function bombPlay(a,b,c){
   const res=[];for(const app of all)res.push(await state(app));
   const r=res[0].result;assert(r&&r.wins);
   for(const x of res){assert.deepEqual(x.result,r,'the same scores and stats table on every host');assert.equal(x.hash,res[0].hash,'the same grid at the end');}
-  check('identical results and identical final grid on all three hosts',{winner:r.winner,wins:r.wins,hash:res[0].hash});
+  check('identical results and identical final grid on all '+all.length+' hosts',{winner:r.winner,wins:r.wins,hash:res[0].hash});
   for(const app of all)await screenshot(app.game,'14-results-'+app.label);
   await assertNoErrors(all,'match');check('no error message on any host through lobby, match and results');
   report.net=res.map(x=>x.net&&{bySlot:x.net.bySlot,recent:x.net.recent?.slice(-8)});
@@ -258,22 +292,27 @@ async function bombPlay(a,b,c){
   await activateButton(a.game,'#again');
   await wait(async()=>{const x=await state(b);return ['count','play'].includes(x.phase);},'rematch reaches b',10000);
   await wait(async()=>(await state(a)).players.find(x=>x.slot===cSlot)?.kind==='bot','c taken over by a computer',20000);
+  if(d)await wait(async()=>['count','play'].includes((await state(d)).phase),'rematch reaches the fourth guest',10000);
+  const remaining=[a,b,...(d?[d]:[])];
+  for(const app of remaining)await wait(async()=>(await world(app)).players.find(p=>p.slot===cSlot)?.kind==='toy','computer takeover uses a toy despite a shared human signature '+app.label,15000);
+  for(const app of remaining){await wait(async()=>{const players=(await world(app)).players;return remaining.every(o=>{const p=players.find(p=>p.slot===slots[o.label]);return p?.kind===kinds[o.label];});},'remaining appearances survive shared-seat takeover '+app.label,15000);await screenshot(app.game,'15-rematch-'+app.label);}
   check('a guest leaving is taken over by a computer; the host starts a rematch');
   await closeWork(a);
   await wait(async()=>{const x=await state(b);return x.session===null||x.phase==='closed';},'host closing ends the room for b',20000);
   await screenshot(b.game,'15-host-closed');check('host closing the game ends the room for the remaining guest');
-  for(const app of all)app.cdpS?.close();
+  if(d)await wait(async()=>{const x=await state(d);return x.session===null||x.phase==='closed';},'host close ends fourth guest',20000);for(const app of all)app.cdpS?.close();
 }
 (async()=>{
   fs.mkdirSync(evidence,{recursive:true});
   try{
-    H.requireNode22();assert(fs.existsSync(source),'build first');report.gameSha256=hash(source);
+    H.requireNode22();assert(fs.existsSync(source),'build first');report.gameSha256=hash(source);report.testSha256=hash(__filename);report.helperSha256=hash(path.join(HOST,'tests/helpers/game-relay-fixture.js'));
+    if(mode==='lan'&&fs.existsSync(path.join(HOST,'demo/core/trial-access/index.js'))){mandatory=await require(path.join(HOST,'tests/helpers/mandatory-login-fixture')).createMandatoryLoginFixture();report.admission='real isolated production account service and UI login; unique phone per host';}
     runtime=F.freeze(H.REPO,root,false);report.source=runtime.source;
-    const ap=await F.freePort(),bp=await F.freePort(),cp=await F.freePort();
-    const a=await boot('a',ap,[bp,cp]),b=await boot('b',bp,[ap,cp]),c=await boot('c',cp,[ap,bp]);
+    if(mode!=='lan'){relay=await require(path.join(HOST,'tests/helpers/game-relay-fixture')).start({hostRoot:HOST,root,evidence});report.relaySource=relay.source;}
+    const ports=await Promise.all(labels.map(()=>F.freePort()));for(let i=0;i<labels.length;i++)await boot(labels[i],ports[i],ports.filter((_,j)=>j!==i));const [a,b,c,d]=apps;
     for(const app of [a,b])await installAppearances(app);
     await applyMain(a,'rat-doll-male');await applyMain(b,'rat-doll-female');
-    await nearby(a,c);await sendGame(a,b);await approvals(a,b);await inviteFromControls(a,c);await bombPlay(a,b,c);
+    await nearby(a,c);await sendGame(a,b);await approvals(a,b);await inviteFromControls(a,c);if(d){await nearby(a,d);await inviteFromControls(a,d);const controls=await H.findTarget(a.cdp,'/work-player.html');await wait(()=>H.evalIn(controls,'document.querySelector("[data-work-invite]")?.disabled && document.querySelector("[data-work-invite]").textContent.includes("4/4")'),'full room disables further invitation');check('four-player capacity is enforced by the real host invite control');}if(relay){const slot=(await state(b)).mySlot,origin=await H.evalIn(a.game,'performance.timeOrigin');assert((await relay.snapshot('b')).connections>0,'actual relay socket exists');await relay.outage('b',3000);await wait(async()=>['reconnecting','waiting'].includes((await state(b)).net.connection),'actual relay disconnect observed',6000);await wait(async()=>(await state(b)).net.connection==='connected'&&(await state(a)).lobby.some(p=>p.slot===slot),'same room recovers after socket outage',12000);assert.equal((await state(b)).mySlot,slot);assert.equal(await H.evalIn(a.game,'performance.timeOrigin'),origin);check('3s actual relay socket interruption reconnects without reloading or changing seat');}await bombPlay(a,b,c,d);
   }catch(error){
     report.failures.push(error.message);report.error=error.stack;console.error(error);
     for(const app of apps){const list=await targets(app).catch(()=>[]);json(path.join(evidence,app.label+'-targets.json'),list.map(t=>({type:t.type,url:t.url,title:t.title})));
@@ -286,6 +325,12 @@ async function bombPlay(a,b,c){
   }finally{
     for(const ws of sockets)ws.close();
     for(const app of apps)await stop(app).catch(e=>report.failures.push('cleanup: '+e.message));
+    if(mandatory)await mandatory.close().catch(e=>report.failures.push('account fixture cleanup: '+e.message));
+    for(const app of apps){app.cdpS?.close();for(const run of app.runs||[])try{const rows=fs.readFileSync(run.native,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);assert(rows.some(r=>r.event==='loaded'&&r.page==='index.html'));assert(rows.every(r=>!r.isVisible&&!r.isFocused&&r.backgroundThrottling===false));assert(run.exited);}catch(e){report.failures.push('native isolation '+app.label+': '+e.message);}}
+    if(relay){try{relay.assertAlive();report.relayCleanup=await relay.stop();}catch(e){report.failures.push(e.message);}}
+    if(runtime&&!isDeepStrictEqual(F.hashes(runtime.root),runtime.files))report.failures.push('frozen source changed');
+    if(report.testSha256&&hash(__filename)!==report.testSha256)report.failures.push('test changed during run');if(report.helperSha256&&hash(path.join(HOST,'tests/helpers/game-relay-fixture.js'))!==report.helperSha256)report.failures.push('helper changed during run');
+    if(report.gameSha256&&hash(source)!==report.gameSha256)report.failures.push('game changed during run');
     if(report.exceptions.length)report.failures.push('uncaught renderer exceptions');
     report.ok=!report.failures.length;json(path.join(evidence,'report.json'),report);
     console.log('REPORT',path.join(evidence,'report.json'),report.ok?'OK':'FAIL');process.exitCode=report.ok?0:1;

@@ -1,5 +1,5 @@
 'use strict';
-// LAN room for the balloon game (SPEC §11) on top of pet-kit: seats, lobby, events, state
+// Internet / LAN room for the balloon game (SPEC §11) on top of pet-kit: seats, lobby, events, state
 // stream, looks and budgets come from the kit; this file only decides what the state carries
 // and who is authoritative for what.
 //
@@ -11,7 +11,7 @@
 const {Room}=require('../vendor/pet-kit/index.js');
 const Game=require('./game.cjs'),Sim=require('./sim.cjs'),Grid=require('./grid.cjs'),C=require('./config.cjs');
 
-const PROTOCOL={id:'pet-bomb',version:1},PURPOSE='bomb.look.v1';
+const PROTOCOL={id:'pet-bomb',version:2},PURPOSE='bomb.look.v1';
 const INTERP_MS=110,EXTRAP_MS=100,HASH_MS=2000;
 const SETTINGS={defaults:{mode:'ffa',rounds:3,items:'advanced',cpu:1},
   validate:v=>({mode:C.MODES.includes(v.mode)?v.mode:'ffa',rounds:C.MATCH.rounds.includes(v.rounds)?v.rounds:3,items:['standard','advanced'].includes(v.items)?v.items:'advanced',cpu:[0,1,2].includes(v.cpu)?v.cpu:1})};
