@@ -26,3 +26,15 @@ English: This is a completed measurement audit, not a smoothness acceptance or a
 ## 发现记录
 
 Agent在评估阶段发现旧测试仍等待已取消的人工设备配对，按当前宿主自动证书确认流程修正并保留真实邀请/权限/连接检查；早期三个玩家的场景包含一个电脑玩家，故最终使用四名真实输入玩家并断言play；正常顶墙不得误算网络卡顿。退出前先停止观测CDP连接，防止已关闭页面的清理请求逐个超时。初步运行保留在本地证据中，以上数值只引用最终四人对照。
+
+## 第二阶段对照结论：不采纳本候选
+
+实际运行 `artifacts/host-e2e/2026-10-14T15-14-51-754Z/report.json`，候选HTML 517b2b9c968843bd9aa5c96920967db5a594fad07761ec43dd7a5e95b82e9441-256 `517b2b9c968843bd9aa5c96920967db5a594fad07761ec43dd7a5e95b82e9441`，源码实验提交 `cfab0f9`（codex/motion-display-experiment）。沿用四人真实隐藏Electron、真实键盘、普通/180ms批次、停止和退出路径。
+
+普通接收端远端P95约4.04–4.12格/秒；弱网P95降低到4.07–4.67，但少数跳变峰值仍36.23格/秒。停止偏差小于0.00334格。
+
+候选使用pet-kit 0.3.0 Motion，仅缓冲绘制；增加v字段保留原始操作者时间，220ms缓冲且无外推。模拟/命中逻辑不改，自己的输入不改。普通显示改善，但代价是额外显示等待与更多状态数据，弱网客人→房主→客人的追赶仍未解决，因此**没有达到值得替换内置版本的验收条件**。不能把P95下降或报告ok=true（观测流程完成）叫作问题修复。没有跑此候选完整战斗/3D/公网及带宽准入，禁止作为可发版版本。
+
+实验保存在独立分支；本交付分支保留原0.2.1 vendor及原HTML，所有原测试保留。测试本身未被回滚。下一步只有在该游戏实际使用优先级提高时，才值得专项处理源模拟时钟校正、两跳延迟及显示与判定一致性；不能用普遍增加显示延迟遮盖，也不因此扩展公共Kit的职责。
+
+English: Rejected experiment, not a released fix. The separate experiment branch keeps the exact 220ms render-only Motion candidate and original sample forwarding for reproducibility. Real four-player normal/batched testing improves some motion metrics, but guest-to-guest spikes persist and extra delay/bandwidth remain. The delivery branch retains the original gameplay, vendored kit and HTML. Full combat, 3D, physical WAN and candidate bandwidth acceptance were not run because the candidate failed the benefit gate.
