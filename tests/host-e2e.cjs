@@ -1,6 +1,6 @@
 'use strict';
 // Actual production UDP discovery, real file-send control and byte delivery,
-// first-use invitation consent + matching TLS pairing codes, hosted game/SDK.
+// Real invitation/capability consent and production TLS; legacy hosts also show pairing codes.
 // No invitation fixture, trust seeding, mock broker or synthesized game results.
 // Hidden windows/real CDP keys prove business behavior, not native OS focus or
 // physical two-computer networking. Only OS keystore is a disposable AES fixture.
@@ -21,7 +21,7 @@ const electron = require(path.join(HOST, 'demo/node_modules/electron'));
 const charIds = ['rat-doll-female', 'rat-doll-male'];
 const F = require(path.join(HOST, 'tests/helpers/lan-appearance-fixture'));
 const { activateButton, activateClosingButton } = require(path.join(HOST, 'tests/e2e/html-card-input'));
-const source = path.join(GAME, 'dist/桌宠水球大作战.html');
+const source = process.env.MOTION_HTML || path.join(GAME, 'dist/桌宠水球大作战.html');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pet-plugin-appearance-peer-delivery-'));
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const evidence = path.join(GAME, 'artifacts/host-e2e', runId);
@@ -29,7 +29,7 @@ const bootstrap = path.join(H.REPO, 'tests/helpers/peer-session-delivery-bootstr
 const report = { runId, root, scope: 'Actual three hidden production hosts (room of host + 2 guests) over loopback UDP/TCP/TLS. OS keystore is test AES-GCM only; native Keychain and two physical machines are not covered.', checks: [], failures: [], screenshots: [], dialogs: [], sdkGrants: [], exceptions: [] };
 const apps = [], sockets = [];
 const mode=process.argv.includes('--mixed')?'mixed':process.argv.includes('--relay')?'relay':'lan';
-const playerCount=process.argv.includes('--four')?4:3;
+const playerCount=process.env.MOTION_AUDIT||process.argv.includes('--four')?4:3;
 assert(!(process.argv.includes('--mixed')&&process.argv.includes('--relay')),'choose one network mode');
 report.mode=mode;report.playerCount=playerCount;report.scope='Actual '+playerCount+' hidden production hosts over '+mode+' (loopback) with real invite, TLS consent, current pets and CDP input; synthetic relay tickets and isolated AES keystore only; not physical internet proof.';
 let runtime,relay,mandatory;
@@ -139,7 +139,8 @@ function classifyDialog(init, text) {
   if (/加入.*(?:对局|游戏)|接受.*邀请|邀请.*联机|一起.*玩|联机邀请/.test(init.title || text)) return 'accept';
   return null;
 }
-async function approvals(a, b, expectPair = true) {
+const manualPairing=!fs.readFileSync(path.join(HOST,'demo/core/peer-session/broker.js'),'utf8').includes('if(code)raw.confirm(code)');
+async function approvals(a, b, expectPair = manualPairing) {
   const seen = new Set(), pairing = new Map(); let accepted = 0, sdk = 0, paired = false;
   await wait(async () => {
     for (const app of [a, b]) for (const page of (await targets(app)).filter(t => t.url.includes('/dialog.html') && !seen.has(t.id))) {
@@ -151,9 +152,10 @@ async function approvals(a, b, expectPair = true) {
     }
     if (pairing.size === 2 && !paired) { const [left, right] = [...pairing.values()]; assert.equal(left.code, right.code); assert.equal(left.code.length, 16); await activateClosingButton(left.app.cdp, left.page, '.btn-primary'); await activateClosingButton(right.app.cdp, right.page, '.btn-primary'); paired = true; check('both independently presented TLS pairing codes match before explicit confirmations'); }
     const pages = await Promise.all([a, b].map(async app => { const page = (await targets(app)).find(t => t.url.startsWith('pet-work:') && !t.url.includes('thumbnail=1')); if (!page) return null; if(app.game?.id!==page.id){app.game=page;await H.cdp(page,'Emulation.setFocusEmulationEnabled',{enabled:true});await H.cdp(page,'Page.captureScreenshot',{format:'png'});await recordErrors(page);} const ready = await H.evalIn(page, '(()=>{const s=window.__bomb?.state();return s?.session==="lan"&&s.mode==="lobby"&&!document.querySelector("#lobby-panel").hidden&&document.querySelectorAll("#seats .seat.you").length===1;})()', 3000).catch(() => false); if (ready) { app.game = page; return page; } return null; }));
-    return pages.every(Boolean);
+    if(!pages.every(Boolean)||expectPair&&!paired)return false;
+    for(const app of [a,b])if((await state(app)).net?.connection!=='connected')return false;return true;
   }, 'invitation, first pairing, SDK permission and current pets', 65000);
-  assert(accepted >= 1, 'recipient must accept each game invitation'); assert(!expectPair || paired); if(expectPair)assert([a.label,b.label].every(label=>report.sdkGrants.includes(label)), 'both fresh hosts require explicit SDK consent, including initial share-only approval');
+  assert(accepted >= 1, 'recipient must accept each game invitation'); assert(!expectPair || paired); assert([a.label,b.label].every(label=>report.sdkGrants.includes(label)), 'both fresh hosts require explicit SDK consent, including initial share-only approval');
   for (const app of [a, b]) { await watch(app.game, app.label + '-game'); assert.equal(await H.evalIn(app.game, '!document.querySelector("#server-address,#room-code") && document.querySelector("#title-panel").hidden'), true); const context = await H.evalIn(app.game, 'pet.sessions.getContext()'); assert.equal(context.role, app === a ? 'host' : 'guest'); assert.equal(context.artifactHash, hash(source)); app.context = context; }
   // The host context keeps the first invitation; each later guest has its own, listed in the host's peers.
   if (a.context.peers.length === 1) assert.equal(a.context.invitationId, b.context.invitationId);
@@ -310,9 +312,9 @@ async function bombPlay(a,b,c,d){
     runtime=F.freeze(H.REPO,root,false);report.source=runtime.source;
     if(mode!=='lan'){relay=await require(path.join(HOST,'tests/helpers/game-relay-fixture')).start({hostRoot:HOST,root,evidence});report.relaySource=relay.source;}
     const ports=await Promise.all(labels.map(()=>F.freePort()));for(let i=0;i<labels.length;i++)await boot(labels[i],ports[i],ports.filter((_,j)=>j!==i));const [a,b,c,d]=apps;
-    for(const app of [a,b])await installAppearances(app);
-    await applyMain(a,'rat-doll-male');await applyMain(b,'rat-doll-female');
-    await nearby(a,c);await sendGame(a,b);await approvals(a,b);await inviteFromControls(a,c);if(d){await nearby(a,d);await inviteFromControls(a,d);const controls=await H.findTarget(a.cdp,'/work-player.html');await wait(()=>H.evalIn(controls,'document.querySelector("[data-work-invite]")?.disabled && document.querySelector("[data-work-invite]").textContent.includes("4/4")'),'full room disables further invitation');check('four-player capacity is enforced by the real host invite control');}if(relay){const slot=(await state(b)).mySlot,origin=await H.evalIn(a.game,'performance.timeOrigin');assert((await relay.snapshot('b')).connections>0,'actual relay socket exists');await relay.outage('b',3000);await wait(async()=>['reconnecting','waiting'].includes((await state(b)).net.connection),'actual relay disconnect observed',6000);await wait(async()=>(await state(b)).net.connection==='connected'&&(await state(a)).lobby.some(p=>p.slot===slot),'same room recovers after socket outage',12000);assert.equal((await state(b)).mySlot,slot);assert.equal(await H.evalIn(a.game,'performance.timeOrigin'),origin);check('3s actual relay socket interruption reconnects without reloading or changing seat');}await bombPlay(a,b,c,d);
+    if(!process.env.MOTION_AUDIT)for(const app of [a,b])await installAppearances(app);
+    if(!process.env.MOTION_AUDIT){await applyMain(a,'rat-doll-male');await applyMain(b,'rat-doll-female');}
+    await nearby(a,c);await sendGame(a,b);await approvals(a,b);await inviteFromControls(a,c);if(d){await nearby(a,d);await inviteFromControls(a,d);const controls=await H.findTarget(a.cdp,'/work-player.html');await wait(()=>H.evalIn(controls,'document.querySelector("[data-work-invite]")?.disabled && document.querySelector("[data-work-invite]").textContent.includes("4/4")'),'full room disables further invitation');check('four-player capacity is enforced by the real host invite control');}if(relay){const slot=(await state(b)).mySlot,origin=await H.evalIn(a.game,'performance.timeOrigin');assert((await relay.snapshot('b')).connections>0,'actual relay socket exists');await relay.outage('b',3000);await wait(async()=>['reconnecting','waiting'].includes((await state(b)).net.connection),'actual relay disconnect observed',6000);await wait(async()=>(await state(b)).net.connection==='connected'&&(await state(a)).lobby.some(p=>p.slot===slot),'same room recovers after socket outage',12000);assert.equal((await state(b)).mySlot,slot);assert.equal(await H.evalIn(a.game,'performance.timeOrigin'),origin);check('3s actual relay socket interruption reconnects without reloading or changing seat');}if(process.env.MOTION_AUDIT)await require('./motion-host.cjs').run({apps,H,wait,state,activateButton,screenshot,json,evidence,report,check,closeWork,game:'bomb'});else await bombPlay(a,b,c,d);
   }catch(error){
     report.failures.push(error.message);report.error=error.stack;console.error(error);
     for(const app of apps){const list=await targets(app).catch(()=>[]);json(path.join(evidence,app.label+'-targets.json'),list.map(t=>({type:t.type,url:t.url,title:t.title})));

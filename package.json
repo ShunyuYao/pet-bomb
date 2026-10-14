@@ -15,6 +15,7 @@
     "test:artifact": "node --test tests/artifact.test.cjs",
     "test:host:relay": "node tests/host-e2e.cjs --relay --four",
     "test:host:mixed": "node tests/host-e2e.cjs --mixed --four",
-    "test:delivery": "npm test && npm run test:host && npm run test:host:relay && npm run test:host:mixed"
+    "test:delivery": "npm test && npm run test:host && npm run test:host:relay && npm run test:host:mixed && npm run test:motion:host",
+    "test:motion:host": "node tests/motion-e2e.cjs"
   }
 }
