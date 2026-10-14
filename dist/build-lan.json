@@ -1,14 +1,14 @@
 {
   "file": "dist/桌宠水球大作战-LAN.html",
-  "bytes": 725652,
-  "sha256": "81d5a980e6e724357ff53d2d68d9d05381f59d7c69b5a1c5989690e05cdd49c9",
+  "bytes": 728524,
+  "sha256": "2c900cc33431c5b3f0db4b2921ced9c25c90dddb869bc0b9a0ec5ab8fe6123a9",
   "version": "0.2.0",
   "protocol": {
     "id": "pet-bomb",
     "version": 2
   },
   "transport": "lan",
-  "petKit": "0.2.1",
+  "petKit": "0.3.0",
   "esbuild": "0.28.1",
   "three": "0.164.1",
   "cannon": "0.20.0"

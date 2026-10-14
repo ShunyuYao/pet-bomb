@@ -336,7 +336,7 @@ function frame(now){
     renderMode();if(mode==='lobby'&&now-lastLobby>400){lastLobby=now;renderLobby();}
     if(mode==='closed'&&session){const s=session;session=null;error(s.lan.closeReason()==='left'?'':'联机已结束：房主离开或连接断开。');renderMode(true);syncPlayers(true);}
     const g=session?.game;
-    if(g?.world){syncPlayers();world.render(dt,{world:g.world,colorOf});if(mode==='play'||mode==='round')hud(g);if(mode!=='play')$('hint').hidden=true;}
+    if(g?.world){syncPlayers();world.render(dt,{world:session?.lan?.renderWorld()||g.world,colorOf});if(mode==='play'||mode==='round')hud(g);if(mode!=='play')$('hint').hidden=true;}
     else world.render(dt,{world:idleWorld(),colorOf:()=>Config.SLOT_COLORS[0]});
   }catch(e){console.error(e);}
   requestAnimationFrame(frame);

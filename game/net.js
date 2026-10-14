@@ -22,6 +22,7 @@ const packPlayer=p=>[p.slot,Math.round(p.x*100),Math.round(p.y*100),faceIdx(p.fa
 function create(sdk,{onLobby=()=>{},onAsset=()=>{},onConnection=()=>{},onClosed=()=>{},onError=()=>{},onFeed=()=>{},now=()=>Date.now(),strict=false,budgetBytes=8*1024,timing=null}={}){
   let game=null,host=false,mySlot=null,lastHash=0,hashMiss=0,remote={ph:'lobby',no:0,wins:{},rr:[]};
   const interp=new Map(),reports=new Map(),budget=[];
+  const presentation=require('./presentation.cjs').create();
   // Remote players are shown INTERP_MS behind, on the round clock the sender stamped (not on
   // arrival time: two samples can arrive in one poll batch, a millisecond apart).
   function pushInterp(slot,s,t){
@@ -47,7 +48,7 @@ function create(sdk,{onLobby=()=>{},onAsset=()=>{},onConnection=()=>{},onClosed=
     budget:{guestBytesPerSec:budgetBytes},onBudget:b=>{budget.push(b);if(budget.length>50)budget.shift();},
     hostState(){
       const w=game?.world,s={ph:game?.phase||'lobby',no:game?.round||0,at:Math.round(room.hostNow()),wins:game?.match.wins||{},rr:game?.roundResults||[]};
-      if(w){s.t=Math.round(w.t);s.p=w.players.map(packPlayer);if(now()-lastHash>=HASH_MS){lastHash=now();s.h=Grid.hash(w.cells,w.lying);}}
+      if(w){s.t=Math.round(w.t);s.p=w.players.map(packPlayer);s.v=w.players.map(p=>{const raw=p.owner==='remote'?presentation.latest(p.slot):null;return [p.slot,raw?.time??Math.round(w.t),raw?.value.x??p.x,raw?.value.y??p.y,faceIdx(raw?.value.face??p.face)];});if(now()-lastHash>=HASH_MS){lastHash=now();s.h=Grid.hash(w.cells,w.lying);}}
       return s;
     },
     guestState(){
@@ -57,13 +58,14 @@ function create(sdk,{onLobby=()=>{},onAsset=()=>{},onConnection=()=>{},onClosed=
     onState(s,slot){
       if(host){
         if(!game?.world||s.no!==game.round)return;
-        const r={t:s.t,x:s.x/100,y:s.y/100,f:s.f,m:s.m};pushInterp(slot,r,s.t);
+        const r={t:s.t,x:s.x/100,y:s.y/100,f:s.f,m:s.m};pushInterp(slot,r,s.t);presentation.push(slot,s.t,{x:r.x,y:r.y,face:FACES[r.f]},game.round);
         const list=reports.get(slot)||[];list.push(r);while(list.length>60)list.shift();reports.set(slot,list);
         return;
       }
       remote={ph:s.ph,no:s.no,wins:s.wins||{},rr:s.rr||[]};
       const w=game?.world;if(!w||s.no!==game.round)return;
       if(Number.isFinite(s.t)){const target=s.t+(room.hostNow()-s.at);if(Math.abs(w.t-target)>80)w.t=target;else w.t+=(target-w.t)*0.1;}
+      for(const [slot,t,x,y,f] of s.v||[])if(slot!==mySlot)presentation.push(slot,t,{x,y,face:FACES[f]},game.round);
       for(const [slot,x,y,f,m] of s.p||[])if(slot!==mySlot)pushInterp(slot,{x:x/100,y:y/100,f,m},s.t);
       if(s.h&&game.phase==='play'){if(s.h!==Grid.hash(w.cells,w.lying)){if(++hashMiss>=2){hashMiss=0;room.emit({type:'req-grid'});}}else hashMiss=0;}
     },
@@ -74,11 +76,11 @@ function create(sdk,{onLobby=()=>{},onAsset=()=>{},onConnection=()=>{},onClosed=
       }
       if(!game)return;
       if(e.type==='grid'){const w=game.world;if(w&&e.no===game.round){for(let i=0;i<w.cells.length;i++){w.cells[i]=+e.cells[i];w.lying[i]=+e.lying[i]-1;}}return;}
-      if(e.type==='round'){interp.clear();}
+      if(e.type==='round'){interp.clear();presentation.clear();}
       Game.receive(game,e);feed(e);
     },
     onLobby:l=>onLobby(l),onAsset,onConnection,onClosed,onError,
-    onPeerLeft(slot,{inMatch}){interp.delete(slot);reports.delete(slot);if(host&&game&&inMatch&&game.roster.some(r=>r.slot===slot))Game.takeOver(game,slot);},
+    onPeerLeft(slot,{inMatch}){interp.delete(slot);presentation.remove(slot);reports.delete(slot);if(host&&game&&inMatch&&game.roster.some(r=>r.slot===slot))Game.takeOver(game,slot);},
   });
 
   function humans(){return room.lobby().players.filter(p=>!p.waiting&&p.online!==false).map(p=>({slot:p.slot,name:p.name,signature:p.signature,look:p.kind,owner:p.slot===0?'local':'remote'}));}
@@ -92,7 +94,7 @@ function create(sdk,{onLobby=()=>{},onAsset=()=>{},onConnection=()=>{},onClosed=
   function flush(){
     const list=game.out.splice(0);
     for(const e of list){
-      if(e.type==='round'){reports.clear();interp.clear();}
+      if(e.type==='round'){reports.clear();interp.clear();presentation.clear();}
       try{room.emit(e);}catch(err){onError(Error(err.message+' in '+JSON.stringify(e).slice(0,200)));}
       feed(e);
     }
@@ -106,6 +108,7 @@ function create(sdk,{onLobby=()=>{},onAsset=()=>{},onConnection=()=>{},onClosed=
       return r;
     },
     get game(){return game;},
+    renderWorld:()=>presentation.world(game?.world,game?.phase==='play'),
     isHost:()=>host,
     mySlot:()=>host?0:room.mySlot(),
     step(dt,input){
